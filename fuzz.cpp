@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <sstream>
 
-#define FUZZ_COUNT 1
+#define FUZZ_COUNT 300
 
 #define CONFIG "config_5"
 #define DEFAULT_CONFIG "config_5_default"
@@ -151,37 +151,37 @@ void replaceWithBoundaryValues(int offset) {
     file.close();
 }
 
-int parseCoverageLog(const std::string& filename) {
+std::set<uintptr_t> parseCoverageLog(const std::string& filename) {
     std::ifstream file(filename);
     std::string line;
-    int dllCount = 0;
-    while (std::getline(file, line))
-        if (line.find("module[  0]") != std::string::npos || line.find("module[  4]") != std::string::npos) {
-            dllCount++;
-            std::cout << line << std::endl;
+    std::set<uintptr_t> addresses;
+    std::string vulnID;
+    std::string dllID;
+    
+    std::string moduleStr;
+    int moduleId;
+    uintptr_t start;
+    char comma;
+    while (std::getline(file, line)) {
+        if (line.find("vuln5.exe") != std::string::npos ){
+            vulnID = line[2];
         }
-    return dllCount;
+        else if(line.find("func.dll") != std::string::npos){
+            dllID = line[2];
+        }
+        if(line.find("module[  "+vulnID+"]") != std::string::npos || line.find("module[  "+dllID+"]") != std::string::npos  ){
+            size_t colonPos = line.find(':');
+            size_t commaPos = line.find(',');
+
+            uintptr_t start = std::stoul(line.substr(colonPos + 2, commaPos - (colonPos + 2)), nullptr, 16);
+
+            addresses.insert(start);
+        }
+    }
+    return addresses;
 }
 
-// bool runWithDynamoRIO(int& coverageSet) {
-//     std::fstream coverage("coverage_log.txt");
-//     std::string command = DRRUN_PATH;
-//     command += " -t drcov -dump_text -- ";
-//     command += VULN;
-
-//     system(command.c_str());
-//     coverage_log = fileName(MAIN_FOLDER_PATH);
-//     int newCoverage = parseCoverageLog(coverage_log);
-//     if(newCoverage > coverageSet){
-//         coverage << "[GOOD] CODE COVER UP! "<< std::endl;
-//         coverageSet = newCoverage;
-//         return true;
-//     }
-//     moveFile(coverage_log);
-//     return false;
- 
-// }
-bool runWithDynamoRIO(int& coverageSet) {
+bool runWithDynamoRIO(std::set<uintptr_t>& coverageSet) {
 
     std::ofstream coverage("coverage_log.txt", std::ios::app);
     if (!coverage) {
@@ -196,17 +196,17 @@ bool runWithDynamoRIO(int& coverageSet) {
 
     coverage_log = fileName(MAIN_FOLDER_PATH);
 
-    int newCoverage = parseCoverageLog(coverage_log);
+    std::set<uintptr_t> newCoverage = parseCoverageLog(coverage_log);
 
-    if (newCoverage > coverageSet) {
-        std::cout << "[GOOD] CODE COVER UP! " << newCoverage << std::endl; 
-        coverage << "[GOOD] CODE COVER UP! " << newCoverage << std::endl; 
+    if (newCoverage.size() > coverageSet.size()) {
+        std::cout << "[GOOD] CODE COVER UP! " << newCoverage.size() << std::endl; 
+        coverage << "[GOOD] CODE COVER UP! " << newCoverage.size() << std::endl; 
         coverageSet = newCoverage; 
         moveFile(coverage_log); 
         return true;
     } 
     else {
-        coverage << "[BAD] CODE COVER DOWN " << newCoverage << std::endl; 
+        coverage << "[BAD] CODE COVER DOWN " << newCoverage.size() << std::endl; 
         moveFile(coverage_log); 
         return false;
     }
@@ -255,7 +255,7 @@ void fuzz() {
     int mutationType = 2;
     int stagnationCounter = 0;
     int maxCount = 10000;
-    int coverageSet = 0;
+    std::set<uintptr_t> coverageSet;
 
     for (int i = 0; i < FUZZ_COUNT; i++) {
         returnDefault();
@@ -306,7 +306,7 @@ void fuzz() {
             log << input.rdbuf();
         }
     }
-    std::cout << "[NEW] Новое покрытие: " << coverageSet << std::endl;
+    std::cout << "[NEW] Новое покрытие: " << coverageSet.size() << std::endl;
 }
 
 void menu(){
