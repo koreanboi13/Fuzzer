@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <sstream>
 
-#define FUZZ_COUNT 300
+#define FUZZ_COUNT 1
 
 #define CONFIG "config_5"
 #define DEFAULT_CONFIG "config_5_default"
@@ -29,8 +29,15 @@
 namespace fs = std::filesystem;
 std::string coverage_log;
 
-std::vector<std::pair<int, uint8_t>> successfulMutations;
+struct Mutation{
+    int type;
+    int offset;
+    uint8_t value;
+    int count;
+};
 
+
+std::vector<Mutation> successfulMutations;
 
 std::string fileName(const std::string& folderPath) {
     std::string latestFile;
@@ -140,7 +147,7 @@ void replaceWithBoundaryValues(int offset) {
         return;
     }
     file.seekp(offset);
-    file.write((const char*)(boundaries.data()), boundaries.size());
+    file.write((const char*)(boundaries.data()), boundaries.size() * sizeof(unsigned int));
     file.close();
 }
 
@@ -149,65 +156,128 @@ int parseCoverageLog(const std::string& filename) {
     std::string line;
     int dllCount = 0;
     while (std::getline(file, line))
-        if (line.find("module[  0]") != std::string::npos || line.find("module[  4]") != std::string::npos) 
+        if (line.find("module[  0]") != std::string::npos || line.find("module[  4]") != std::string::npos) {
             dllCount++;
+            std::cout << line << std::endl;
+        }
     return dllCount;
 }
 
+// bool runWithDynamoRIO(int& coverageSet) {
+//     std::fstream coverage("coverage_log.txt");
+//     std::string command = DRRUN_PATH;
+//     command += " -t drcov -dump_text -- ";
+//     command += VULN;
+
+//     system(command.c_str());
+//     coverage_log = fileName(MAIN_FOLDER_PATH);
+//     int newCoverage = parseCoverageLog(coverage_log);
+//     if(newCoverage > coverageSet){
+//         coverage << "[GOOD] CODE COVER UP! "<< std::endl;
+//         coverageSet = newCoverage;
+//         return true;
+//     }
+//     moveFile(coverage_log);
+//     return false;
+ 
+// }
 bool runWithDynamoRIO(int& coverageSet) {
-    std::fstream coverage("coverage_log.txt");
+
+    std::ofstream coverage("coverage_log.txt", std::ios::app);
+    if (!coverage) {
+        std::cerr << "Ошибка открытия файла coverage_log.txt!" << std::endl;
+        return false;
+    }
+
     std::string command = DRRUN_PATH;
     command += " -t drcov -dump_text -- ";
     command += VULN;
-
     system(command.c_str());
-    coverage_log = fileName(MAIN_FOLDER_PATH);
-    int newCoverage = parseCoverageLog(coverage_log);
-    bool expanded = newCoverage > coverageSet;
-    if(expanded){
-        coverage << "[GOOD] CODE COVER UP! " << newCoverage << std::endl;
-        coverageSet = newCoverage;
-    }
-    
-    moveFile(coverage_log);
-    return expanded;
 
+    coverage_log = fileName(MAIN_FOLDER_PATH);
+
+    int newCoverage = parseCoverageLog(coverage_log);
+
+    if (newCoverage > coverageSet) {
+        std::cout << "[GOOD] CODE COVER UP! " << newCoverage << std::endl; 
+        coverage << "[GOOD] CODE COVER UP! " << newCoverage << std::endl; 
+        coverageSet = newCoverage; 
+        moveFile(coverage_log); 
+        return true;
+    } 
+    else {
+        coverage << "[BAD] CODE COVER DOWN " << newCoverage << std::endl; 
+        moveFile(coverage_log); 
+        return false;
+    }
 }
+
 void saveSuccessfulMutations() {
     std::ofstream file(MUTATION_LOG, std::ios::binary);
-    for (const auto& mutation : successfulMutations) {
-        file.write((const char*)(&mutation.first), sizeof(int));
-        file.write((const char*)(&mutation.second), sizeof(uint8_t));
+    if (!file) {
+        std::cerr << "Ошибка открытия файла для сохранения мутаций!" << std::endl;
+        return;
     }
+
+    for (const auto& mutation : successfulMutations)
+        file.write((const char*)(&mutation), sizeof(Mutation));
 }
 
 void applySuccessfulMutations() {
-    for (const auto& mutation : successfulMutations)
-        replaceOneByte(mutation.first, mutation.second);
+    for (const auto& mutation : successfulMutations) {
+        switch (mutation.type) {
+            case 0:
+                replaceOneByte(mutation.offset, mutation.value);
+                break;
+            case 1:
+                replaceBytes(mutation.offset, mutation.count, mutation.value);
+                break;
+            case 2:
+                appendToFile(mutation.value, mutation.count);
+                break;
+            default:
+                std::cerr << "Неизвестный тип мутации: " << mutation.type << std::endl;
+                break;
+        }
+    }
 }
+
 void fuzz() {
-    std::fstream coverage("coverage_log.txt");
+    std::ofstream coverage("coverage_log.txt", std::ios::app);
+    if (!coverage) {
+        std::cerr << "Ошибка открытия файла coverage_log.txt!" << std::endl;
+        return;
+    }
+
     srand(time(NULL));
     int maxOffset = fileSize(CONFIG);
     int maxValue = 255;
     int mutationType = 2;
     int stagnationCounter = 0;
-    int maxCount = 100; 
+    int maxCount = 10000;
     int coverageSet = 0;
-    
-    for(int i = 0; i < FUZZ_COUNT; i++) {
+
+    for (int i = 0; i < FUZZ_COUNT; i++) {
         returnDefault();
-        
+
         if (stagnationCounter >= 100) {
             std::cout << "Возврат к лучшим мутациям" << std::endl;
+            coverage << "[NEW] Возврат к лучшим мутациям" << std::endl;
             applySuccessfulMutations();
             stagnationCounter = 0;
         }
 
-        int type = rand() % (mutationType+1);
-        size_t offset = rand() % (maxOffset+1);
-        uint8_t value = rand() % (maxValue+1);
-        int count = rand() % (maxCount+1);
+        int type = rand() % (mutationType + 1);
+        size_t offset = rand() % (maxOffset + 1);
+        uint8_t value = rand() % (maxValue + 1);
+        int count = rand() % (maxCount + 1);
+
+        Mutation mutation;
+        mutation.type = type;
+        mutation.offset = offset;
+        mutation.value = value;
+        mutation.count = count;
+
         switch (type) {
             case 0:
                 replaceOneByte(offset, value);
@@ -222,11 +292,10 @@ void fuzz() {
         }
 
         if (runWithDynamoRIO(coverageSet)) {
-            successfulMutations.emplace_back(offset, value);
+            successfulMutations.push_back(mutation); 
             stagnationCounter = 0;
-            coverage << "[GOOD] Successfull mutation"<< std::endl; 
+            coverage << "[GOOD] Успешная мутация: type=" << type << ", offset=" << offset << ", value=" << std::hex << (int)value << ", count=" << std::dec << count << std::endl;
             saveSuccessfulMutations();
-            continue;
         } 
         else {
             stagnationCounter++;
@@ -235,10 +304,9 @@ void fuzz() {
             std::ofstream log("crash_input.txt", std::ios::binary);
             std::ifstream input(CONFIG, std::ios::binary);
             log << input.rdbuf();
-            continue;
         }
     }
-    std::cout << "[NEW]Новое покрытие: " << coverageSet << std::endl;
+    std::cout << "[NEW] Новое покрытие: " << coverageSet << std::endl;
 }
 
 void menu(){
@@ -314,7 +382,7 @@ int main() {
                 std::cin >> std::hex >> value;
                 std::cout << "\n";
 
-                appendToFile(value, offset);
+                appendToFile(value, count);
                 break;
             case 7:
                 fuzz();
