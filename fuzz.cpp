@@ -52,41 +52,37 @@ std::string fileName(const std::string& folderPath) {
     return latestFile;
 }
 void copyVulnFile() {
-    // Путь к исходному .exe файлу
+
     fs::path exeSourcePath = fs::current_path() / "vulns" / VULN;
-    // Путь к исходному конфигурационному файлу
+
     fs::path configSourcePath = fs::current_path() / "vulns" / CONFIG;
 
-    // Путь для копирования .exe файла
+  
     fs::path exeDestinationPath = fs::current_path() / VULN;
-    // Путь для копирования конфигурационного файла
+  
     fs::path configDestinationPath = fs::current_path() / CONFIG;
-    // Путь для копии конфигурационного файла с новым именем
+   
     std::string copyName = std::string("config_") + vulnNum + "_default";
     fs::path configCopyPath = fs::current_path() / copyName;
 
     try {
-        // Проверка существования .exe файла
         if (!fs::exists(exeSourcePath)) {
             std::cerr << "Ошибка: файл " << exeSourcePath << " не найден!\n";
             return;
         }
 
-        // Проверка существования конфигурационного файла
+
         if (!fs::exists(configSourcePath)) {
             std::cerr << "Ошибка: файл " << configSourcePath << " не найден!\n";
             return;
         }
 
-        // Копирование .exe файла
         fs::copy_file(exeSourcePath, exeDestinationPath, fs::copy_options::overwrite_existing);
         std::cout << "Файл " << VULN << " скопирован в " << exeDestinationPath << "\n";
 
-        // Копирование конфигурационного файла
         fs::copy_file(configSourcePath, configDestinationPath, fs::copy_options::overwrite_existing);
         std::cout << "Файл " << CONFIG << " скопирован в " << configDestinationPath << "\n";
 
-        // Создание копии конфигурационного файла с новым именем
         fs::copy_file(configDestinationPath, configCopyPath, fs::copy_options::overwrite_existing);
         std::cout << "Файл " << CONFIG << " скопирован как " << configCopyPath << "\n";
 
@@ -449,7 +445,7 @@ void fuzz() {
     int maxValue = 255;
     int mutationType = 2;
     int stagnationCounter = 0;
-    int maxCount = 5000;
+    int maxCount = 10000;
     std::set<uintptr_t> coverageSet;
     int flag = 0;
     for (int i = 0; i < FUZZ_COUNT; i++) {
@@ -462,29 +458,30 @@ void fuzz() {
             applySuccessfulMutations();
             stagnationCounter = 0;
         }
+        for(int j =0 ; j < 5; j++){
+            int type = rand() % (mutationType + 1);
+            size_t offset = rand() % (maxOffset + 1);
+            uint8_t value = rand() % (maxValue + 1);
+            int count = rand() % (maxCount + 1);
 
-        int type = rand() % (mutationType + 1);
-        size_t offset = rand() % (maxOffset + 1);
-        uint8_t value = rand() % (maxValue + 1);
-        int count = rand() % (maxCount + 1);
+            Mutation mutation;
+            mutation.type = type;
+            mutation.offset = offset;
+            mutation.value = value;
+            mutation.count = count;
 
-        Mutation mutation;
-        mutation.type = type;
-        mutation.offset = offset;
-        mutation.value = value;
-        mutation.count = count;
-
-        switch (type) {
-            case 0:
-                replaceOneByte(offset, value);
-                break;
-            case 1:
-                replaceBytes(offset, count, value);
-                break;
-            case 2:
-                appendToFile(value, count);
-                maxOffset = fileSize(CONFIG);
-                break;
+            switch (type) {
+                case 0:
+                    replaceOneByte(offset, value);
+                    break;
+                case 1:
+                    replaceBytes(offset, count, value);
+                    break;
+                case 2:
+                    appendToFile(value, count);
+                    maxOffset = fileSize(CONFIG);
+                    break;
+            }
         }
         runProgram(mutation);
 
