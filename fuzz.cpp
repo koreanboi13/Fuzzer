@@ -458,30 +458,29 @@ void fuzz() {
             applySuccessfulMutations();
             stagnationCounter = 0;
         }
-        for(int j =0 ; j < 5; j++){
-            int type = rand() % (mutationType + 1);
-            size_t offset = rand() % (maxOffset + 1);
-            uint8_t value = rand() % (maxValue + 1);
-            int count = rand() % (maxCount + 1);
+        
+        int type = rand() % (mutationType + 1);
+        size_t offset = rand() % (maxOffset + 1);
+        uint8_t value = rand() % (maxValue + 1);
+        int count = rand() % (maxCount + 1);
 
-            Mutation mutation;
-            mutation.type = type;
-            mutation.offset = offset;
-            mutation.value = value;
-            mutation.count = count;
+        Mutation mutation;
+        mutation.type = type;
+        mutation.offset = offset;
+        mutation.value = value;
+        mutation.count = count;
 
-            switch (type) {
-                case 0:
-                    replaceOneByte(offset, value);
-                    break;
-                case 1:
-                    replaceBytes(offset, count, value);
-                    break;
-                case 2:
-                    appendToFile(value, count);
-                    maxOffset = fileSize(CONFIG);
-                    break;
-            }
+        switch (type) {
+            case 0:
+                replaceOneByte(offset, value);
+                break;
+            case 1:
+                replaceBytes(offset, count, value);
+                break;
+            case 2:
+                appendToFile(value, count);
+                maxOffset = fileSize(CONFIG);
+                break;
         }
         runProgram(mutation);
 
